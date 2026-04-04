@@ -42,7 +42,7 @@ def _dominant_color(cell: np.ndarray, margin_fraction: float = 0.15) -> tuple[in
 
 def _merge_similar_colors(
     colors: list[tuple[int, int, int]],
-    threshold: float = 30.0,
+    threshold: float = 50.0,
 ) -> dict[tuple[int, int, int], tuple[int, int, int]]:
     """Merge colors within Euclidean RGB distance threshold.
 
