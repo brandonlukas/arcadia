@@ -94,32 +94,23 @@ def quantize(image: Image.Image, grid: AlignedGrid | GridResult) -> PaletteResul
     """
     pixels = np.array(image)
 
-    # Extract dominant color for each cell using boundary positions
-    raw_colors: list[list[tuple[int, int, int]]] = []
-
+    # Build boundary arrays — AlignedGrid has them, GridResult uses fixed intervals
     if isinstance(grid, AlignedGrid):
-        for row in range(grid.grid_height):
-            color_row: list[tuple[int, int, int]] = []
-            y_start = grid.y_boundaries[row]
-            y_end = grid.y_boundaries[row + 1]
-            for col in range(grid.grid_width):
-                x_start = grid.x_boundaries[col]
-                x_end = grid.x_boundaries[col + 1]
-                cell = pixels[y_start:y_end, x_start:x_end]
-                color_row.append(_dominant_color(cell))
-            raw_colors.append(color_row)
+        x_bounds = grid.x_boundaries
+        y_bounds = grid.y_boundaries
     else:
-        cell_size = grid.cell_size
-        for row in range(grid.grid_height):
-            color_row = []
-            y_start = row * cell_size
-            y_end = min(y_start + cell_size, pixels.shape[0])
-            for col in range(grid.grid_width):
-                x_start = col * cell_size
-                x_end = min(x_start + cell_size, pixels.shape[1])
-                cell = pixels[y_start:y_end, x_start:x_end]
-                color_row.append(_dominant_color(cell))
-            raw_colors.append(color_row)
+        cs = grid.cell_size
+        x_bounds = [min(col * cs, pixels.shape[1]) for col in range(grid.grid_width + 1)]
+        y_bounds = [min(row * cs, pixels.shape[0]) for row in range(grid.grid_height + 1)]
+
+    # Extract dominant color for each cell
+    raw_colors: list[list[tuple[int, int, int]]] = []
+    for row in range(grid.grid_height):
+        color_row: list[tuple[int, int, int]] = []
+        for col in range(grid.grid_width):
+            cell = pixels[y_bounds[row]:y_bounds[row + 1], x_bounds[col]:x_bounds[col + 1]]
+            color_row.append(_dominant_color(cell))
+        raw_colors.append(color_row)
 
     # Flatten, merge similar colors, rebuild grid
     all_colors = [c for row in raw_colors for c in row]

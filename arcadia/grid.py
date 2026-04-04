@@ -81,23 +81,8 @@ def _best_cell_size(
     as long as it has reasonable prominence. In pixel art, the fundamental
     frequency (smallest cell size) is correct — larger peaks are harmonics.
     """
-    min_prominence = 0.0
     candidates = []
-    for lag, prominence in peaks:
-        if lag <= 0 or lag > image_dim // 2:
-            continue
-        ratio = image_dim / lag
-        rounded = round(ratio)
-        if rounded < 2:
-            continue
-        remainder = abs(ratio - rounded) / rounded
-        # Accept if within 2% of integer divisibility
-        if remainder <= 0.02:
-            candidates.append((lag, prominence, remainder))
-        min_prominence = max(min_prominence, prominence)
-
-    if not candidates:
-        # Relax: allow 5% tolerance
+    for tolerance in (0.02, 0.05):
         for lag, prominence in peaks:
             if lag <= 0 or lag > image_dim // 2:
                 continue
@@ -106,8 +91,10 @@ def _best_cell_size(
             if rounded < 2:
                 continue
             remainder = abs(ratio - rounded) / rounded
-            if remainder <= 0.05:
+            if remainder <= tolerance:
                 candidates.append((lag, prominence, remainder))
+        if candidates:
+            break
 
     if not candidates:
         return None
