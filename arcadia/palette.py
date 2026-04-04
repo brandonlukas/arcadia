@@ -42,7 +42,7 @@ def _dominant_color(cell: np.ndarray, margin_fraction: float = 0.15) -> tuple[in
 
 def _merge_similar_colors(
     colors: list[tuple[int, int, int]],
-    threshold: float = 50.0,
+    threshold: float = 40.0,
 ) -> dict[tuple[int, int, int], tuple[int, int, int]]:
     """Merge colors within Euclidean RGB distance threshold.
 
@@ -112,19 +112,29 @@ def quantize(image: Image.Image, grid: AlignedGrid | GridResult) -> PaletteResul
             color_row.append(_dominant_color(cell))
         raw_colors.append(color_row)
 
-    # Flatten, merge similar colors, rebuild grid
+    # Flatten, merge similar colors to establish the palette
     all_colors = [c for row in raw_colors for c in row]
     merge_map = _merge_similar_colors(all_colors)
 
+    # Build palette from merge centroids
+    palette_rgb = sorted(set(merge_map.values()))
+    palette_arr = np.array(palette_rgb, dtype=np.float64)
+
+    # Re-assign each cell to the nearest palette color from its raw median.
+    # This is better than using the merge map directly, because the merge map
+    # maps raw → centroid, but the centroid may be far from the raw color when
+    # the cluster is large. Nearest-neighbor assignment minimizes per-cell error.
     color_grid: list[list[str]] = []
     for row in raw_colors:
         hex_row: list[str] = []
         for color in row:
-            merged = merge_map[color]
-            hex_row.append(_rgb_to_hex(*merged))
+            color_arr = np.array(color, dtype=np.float64)
+            distances = np.sqrt(np.sum((palette_arr - color_arr) ** 2, axis=1))
+            nearest = palette_rgb[int(np.argmin(distances))]
+            hex_row.append(_rgb_to_hex(*nearest))
         color_grid.append(hex_row)
 
-    # Build palette from merged colors
+    # Build palette from actually used colors
     palette_set: set[str] = set()
     for row in color_grid:
         palette_set.update(row)
