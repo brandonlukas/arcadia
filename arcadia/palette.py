@@ -42,7 +42,7 @@ def _dominant_color(cell: np.ndarray, margin_fraction: float = 0.15) -> tuple[in
 
 def _merge_similar_colors(
     colors: list[tuple[int, int, int]],
-    threshold: float = 30.0,
+    threshold: float = 40.0,
 ) -> dict[tuple[int, int, int], tuple[int, int, int]]:
     """Merge colors within Euclidean RGB distance threshold.
 
@@ -82,6 +82,45 @@ def _merge_similar_colors(
     return representatives
 
 
+def _refine_palette(
+    palette: list[tuple[int, int, int]],
+    cell_counts: dict[tuple[int, int, int], int],
+    max_colors: int = 20,
+) -> list[tuple[int, int, int]]:
+    """Hierarchically merge closest palette colors until at most max_colors remain.
+
+    Uses weighted average (by cell count) so common colors dominate.
+    """
+    palette = list(palette)
+    counts = dict(cell_counts)
+
+    while len(palette) > max_colors:
+        arr = np.array(palette, dtype=np.float64)
+        # Find closest pair
+        min_dist = float("inf")
+        mi, mj = 0, 1
+        for i in range(len(arr)):
+            for j in range(i + 1, len(arr)):
+                d = np.sqrt(np.sum((arr[i] - arr[j]) ** 2))
+                if d < min_dist:
+                    min_dist = d
+                    mi, mj = i, j
+        ci, cj = palette[mi], palette[mj]
+        ni, nj = counts.get(ci, 1), counts.get(cj, 1)
+        merged = tuple(
+            int(round((ci[k] * ni + cj[k] * nj) / (ni + nj))) for k in range(3)
+        )
+        counts[merged] = ni + nj
+        counts.pop(ci, None)
+        counts.pop(cj, None)
+        # Remove in reverse order to preserve indices
+        palette.pop(max(mi, mj))
+        palette.pop(min(mi, mj))
+        palette.append(merged)
+
+    return sorted(palette)
+
+
 def quantize(image: Image.Image, grid: AlignedGrid | GridResult) -> PaletteResult:
     """Quantize image colors based on the detected grid.
 
@@ -112,19 +151,38 @@ def quantize(image: Image.Image, grid: AlignedGrid | GridResult) -> PaletteResul
             color_row.append(_dominant_color(cell))
         raw_colors.append(color_row)
 
-    # Flatten, merge similar colors, rebuild grid
+    # Flatten, merge similar colors to establish the palette
     all_colors = [c for row in raw_colors for c in row]
     merge_map = _merge_similar_colors(all_colors)
 
+    # Build palette from merge centroids
+    palette_rgb = sorted(set(merge_map.values()))
+
+    # If palette is too large, hierarchically merge the closest pairs
+    if len(palette_rgb) > 20:
+        from collections import Counter
+        # Count cells per palette color
+        cell_palette_colors = [merge_map[c] for c in all_colors]
+        cell_counts = dict(Counter(cell_palette_colors))
+        palette_rgb = _refine_palette(palette_rgb, cell_counts, max_colors=20)
+
+    palette_arr = np.array(palette_rgb, dtype=np.float64)
+
+    # Re-assign each cell to the nearest palette color from its raw median.
+    # This is better than using the merge map directly, because the merge map
+    # maps raw → centroid, but the centroid may be far from the raw color when
+    # the cluster is large. Nearest-neighbor assignment minimizes per-cell error.
     color_grid: list[list[str]] = []
     for row in raw_colors:
         hex_row: list[str] = []
         for color in row:
-            merged = merge_map[color]
-            hex_row.append(_rgb_to_hex(*merged))
+            color_arr = np.array(color, dtype=np.float64)
+            distances = np.sqrt(np.sum((palette_arr - color_arr) ** 2, axis=1))
+            nearest = palette_rgb[int(np.argmin(distances))]
+            hex_row.append(_rgb_to_hex(*nearest))
         color_grid.append(hex_row)
 
-    # Build palette from merged colors
+    # Build palette from actually used colors
     palette_set: set[str] = set()
     for row in color_grid:
         palette_set.update(row)
