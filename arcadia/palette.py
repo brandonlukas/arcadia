@@ -82,6 +82,45 @@ def _merge_similar_colors(
     return representatives
 
 
+def _refine_palette(
+    palette: list[tuple[int, int, int]],
+    cell_counts: dict[tuple[int, int, int], int],
+    max_colors: int = 20,
+) -> list[tuple[int, int, int]]:
+    """Hierarchically merge closest palette colors until at most max_colors remain.
+
+    Uses weighted average (by cell count) so common colors dominate.
+    """
+    palette = list(palette)
+    counts = dict(cell_counts)
+
+    while len(palette) > max_colors:
+        arr = np.array(palette, dtype=np.float64)
+        # Find closest pair
+        min_dist = float("inf")
+        mi, mj = 0, 1
+        for i in range(len(arr)):
+            for j in range(i + 1, len(arr)):
+                d = np.sqrt(np.sum((arr[i] - arr[j]) ** 2))
+                if d < min_dist:
+                    min_dist = d
+                    mi, mj = i, j
+        ci, cj = palette[mi], palette[mj]
+        ni, nj = counts.get(ci, 1), counts.get(cj, 1)
+        merged = tuple(
+            int(round((ci[k] * ni + cj[k] * nj) / (ni + nj))) for k in range(3)
+        )
+        counts[merged] = ni + nj
+        counts.pop(ci, None)
+        counts.pop(cj, None)
+        # Remove in reverse order to preserve indices
+        palette.pop(max(mi, mj))
+        palette.pop(min(mi, mj))
+        palette.append(merged)
+
+    return sorted(palette)
+
+
 def quantize(image: Image.Image, grid: AlignedGrid | GridResult) -> PaletteResult:
     """Quantize image colors based on the detected grid.
 
@@ -118,6 +157,15 @@ def quantize(image: Image.Image, grid: AlignedGrid | GridResult) -> PaletteResul
 
     # Build palette from merge centroids
     palette_rgb = sorted(set(merge_map.values()))
+
+    # If palette is too large, hierarchically merge the closest pairs
+    if len(palette_rgb) > 20:
+        from collections import Counter
+        # Count cells per palette color
+        cell_palette_colors = [merge_map[c] for c in all_colors]
+        cell_counts = dict(Counter(cell_palette_colors))
+        palette_rgb = _refine_palette(palette_rgb, cell_counts, max_colors=20)
+
     palette_arr = np.array(palette_rgb, dtype=np.float64)
 
     # Re-assign each cell to the nearest palette color from its raw median.
