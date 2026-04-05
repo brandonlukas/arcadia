@@ -8,7 +8,7 @@ from PIL import Image
 from arcadia.grid import GridResult
 
 # Minimum edge strength relative to the image max to count as a real boundary
-EDGE_THRESHOLD_RATIO = 0.15
+EDGE_THRESHOLD_RATIO = 0.10
 
 # How far (in pixels) a boundary can drift from its expected position
 DEFAULT_TOLERANCE = 2
