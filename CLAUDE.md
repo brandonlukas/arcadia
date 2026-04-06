@@ -8,6 +8,7 @@ Pixel art PNG to SVG converter. Converts AI-generated "pixel art" images into tr
 arcadia input.png                    # → input.svg
 arcadia input.png -o output.svg      # custom output path
 arcadia input.png -v                 # verbose (grid size, palette count, timing)
+arcadia input.png -c 8               # override cell size (pixels per logical pixel)
 ```
 
 ## Development

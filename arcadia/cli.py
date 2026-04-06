@@ -24,6 +24,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "-v", "--verbose", action="store_true",
         help="Print diagnostic information during conversion",
     )
+    parser.add_argument(
+        "-c", "--cell-size", type=int, default=None,
+        help="Override auto-detected cell size (pixels per logical pixel)",
+    )
     return parser.parse_args(argv)
 
 
@@ -61,7 +65,7 @@ def main(argv: list[str] | None = None) -> None:
         print(f"Loaded: {args.input} ({img.width}x{img.height})")
 
     try:
-        convert(img, output, verbose=args.verbose)
+        convert(img, output, verbose=args.verbose, cell_size=args.cell_size)
     except GridDetectionError as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)

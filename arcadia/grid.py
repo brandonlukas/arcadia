@@ -112,12 +112,32 @@ def _best_cell_size(
     return best_lag, best_prominence
 
 
+def _collect_candidates(
+    peaks: list[tuple[int, float]], image_dim: int,
+) -> list[tuple[int, float]]:
+    """Collect all viable cell size candidates from peaks."""
+    candidates = []
+    for tolerance in (0.02, 0.05):
+        for lag, prominence in peaks:
+            if lag <= 0 or lag > image_dim // 2:
+                continue
+            ratio = image_dim / lag
+            rounded = round(ratio)
+            if rounded < 2:
+                continue
+            remainder = abs(ratio - rounded) / rounded
+            if remainder <= tolerance:
+                candidates.append((lag, prominence))
+        if candidates:
+            break
+    return candidates
+
+
 def detect_grid(image: Image.Image) -> GridResult:
     """Detect the pixel grid in an AI-generated pixel art image.
 
-    Uses autocorrelation of the gradient signal. Raw pixel values have random
-    colors per cell (no periodicity), but the gradient (color transitions at
-    cell boundaries) is periodic with period = cell_size.
+    Uses autocorrelation of the gradient signal, then scores the top candidates
+    by cell uniformity to avoid picking sub-cell texture as the grid.
 
     Args:
         image: RGB PIL Image.
@@ -129,26 +149,24 @@ def detect_grid(image: Image.Image) -> GridResult:
         GridDetectionError: If grid cannot be reliably detected.
     """
     gray = np.array(image.convert("L"), dtype=np.float64)
+    pixels = np.array(image)
     height, width = gray.shape
 
     n_row_samples = max(20, height // 10)
     n_col_samples = max(20, width // 10)
 
-    # Sample rows and columns separately (they have different lengths for non-square images)
     row_indices = np.linspace(0, height - 1, n_row_samples, dtype=int)
     col_indices = np.linspace(0, width - 1, n_col_samples, dtype=int)
 
-    row_lines = gray[row_indices, :]    # shape: (n_row_samples, width)
-    col_lines = gray[:, col_indices].T  # shape: (n_col_samples, height)
+    row_lines = gray[row_indices, :]
+    col_lines = gray[:, col_indices].T
 
     def _filter_low_variance(lines: np.ndarray) -> np.ndarray:
-        """Filter out lines with variance < 5% of the max variance."""
         variances = np.var(lines, axis=1)
         max_var = variances.max()
         if max_var < 1e-10:
-            return lines[:0]  # empty
-        threshold = max_var * 0.05
-        return lines[variances >= threshold]
+            return lines[:0]
+        return lines[variances >= max_var * 0.05]
 
     row_filtered = _filter_low_variance(row_lines)
     col_filtered = _filter_low_variance(col_lines)
@@ -183,45 +201,33 @@ def detect_grid(image: Image.Image) -> GridResult:
     avg_h = _avg_gradient_autocorr(row_filtered, max_lag_h)
     avg_v = _avg_gradient_autocorr(col_filtered, max_lag_v)
 
-    # Find peaks for horizontal and vertical
     peaks_h = _find_peaks_with_prominence(avg_h)
     peaks_v = _find_peaks_with_prominence(avg_v)
 
-    result_h = _best_cell_size(peaks_h, width)
-    result_v = _best_cell_size(peaks_v, height)
+    # Collect autocorrelation candidates from both axes
+    cands_h = _collect_candidates(peaks_h, width)
+    cands_v = _collect_candidates(peaks_v, height)
 
-    if result_h is None and result_v is None:
+    if not cands_h and not cands_v:
         raise GridDetectionError(
             "No periodic grid pattern detected in the image. "
             "The autocorrelation found no significant peaks. "
             "This may not be a pixel art image."
         )
 
-    # Use the result with higher prominence, or the one that exists.
-    # When both axes agree, that's strong evidence — boost confidence.
-    # Prominence of 0.15+ is typical for real AI pixel art images.
-    if result_h is not None and result_v is not None:
-        cell_h, prom_h = result_h
-        cell_v, prom_v = result_v
-        if cell_h == cell_v:
-            cell_size = cell_h
-            # Both axes agree: strong signal. Scale so that prominence ~0.15 → confidence ~0.6
-            avg_prom = (prom_h + prom_v) / 2.0
-            confidence = min(1.0, avg_prom * 4.0)
-        else:
-            if prom_h >= prom_v:
-                cell_size = cell_h
-                confidence = min(1.0, prom_h * 2.5)
-            else:
-                cell_size = cell_v
-                confidence = min(1.0, prom_v * 2.5)
-    elif result_h is not None:
-        cell_size, prom = result_h
-        confidence = min(1.0, prom * 2.0)
-    else:
-        assert result_v is not None
-        cell_size, prom = result_v
-        confidence = min(1.0, prom * 2.0)
+    # Gather unique cell sizes with their best prominence
+    cell_size_proms: dict[int, float] = {}
+    for lag, prom in cands_h + cands_v:
+        if lag not in cell_size_proms or prom > cell_size_proms[lag]:
+            cell_size_proms[lag] = prom
+
+    max_prom = max(cell_size_proms.values())
+    viable = {cs: p for cs, p in cell_size_proms.items() if p >= max_prom * 0.3}
+
+    # Among viable candidates, prefer the smallest (fundamental frequency)
+    sorted_viable = sorted(viable.keys())
+    cell_size = sorted_viable[0]
+    confidence = min(1.0, viable[cell_size] * 4.0)
 
     confidence = min(1.0, max(0.0, confidence))
 

@@ -11,17 +11,32 @@ from arcadia.palette import quantize
 from arcadia.svg import render
 
 
-def convert(image: Image.Image, output_path: Path, verbose: bool = False) -> None:
+def convert(
+    image: Image.Image,
+    output_path: Path,
+    verbose: bool = False,
+    cell_size: int | None = None,
+) -> None:
     """Convert an RGB PIL Image to a pixel art SVG.
 
     Args:
         image: RGB PIL Image (already loaded and converted from RGBA if needed).
         output_path: Where to write the output SVG file.
         verbose: Print diagnostic info.
+        cell_size: Override auto-detected cell size. If None, auto-detect.
     """
     t0 = time.perf_counter()
 
-    grid = detect_grid(image)
+    if cell_size is not None:
+        from arcadia.grid import GridResult
+        grid = GridResult(
+            cell_size=cell_size,
+            grid_width=round(image.width / cell_size),
+            grid_height=round(image.height / cell_size),
+            confidence=1.0,
+        )
+    else:
+        grid = detect_grid(image)
     t_grid = time.perf_counter()
     if verbose:
         print(
